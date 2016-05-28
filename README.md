@@ -12,13 +12,13 @@ Qiitaでの連載「[Terraform for さくらのクラウド スタートガイ�
   - [第4回サンプルコード](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/tree/no4) / [Qiita連載第4回](http://qiita.com/yamamoto-febc/items/a9795cb909bd9b69f729) ([第3回との差分表示](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/compare/no3...no4))
   - [第5回サンプルコード](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/tree/no5) / [Qiita連載第5回](http://qiita.com/yamamoto-febc/items/4b774404e041fa05688a) ([第4回との差分表示](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/compare/no4...no5))
 
-## 第2回
+## 第3回
 
-[連載第2回](http://qiita.com/yamamoto-febc/items/2480b11c9e6a8b64f78d)のサンプルコードです。
+[連載第3回](http://qiita.com/yamamoto-febc/items/fe954e2d4a92b864cfef)のサンプルコードです。
 
-![servers02.png](images/servers02.png)
+![servers03.png](images/servers03.png)
 
-## 第2回 : tfファイル
+## 第3回 : tfファイル
 
 ```sakura.tf
 provider "sakuracloud" {
@@ -38,11 +38,49 @@ resource "sakuracloud_server" "server" {
     name = "${format("server%02d" , count.index+1)}"
     disks = ["${element(sakuracloud_disk.disk.*.id,count.index)}"]
     count = 2
+    # 1: サーバーにはSSHで接続
+    connection {
+       user = "root"
+       host = "${self.base_nw_ipaddress}"
+       private_key = "${file("./id_rsa")}"
+    }
+
+    # ２： yumでapache+PHPのインストール
+　　　　　　　　provisioner "remote-exec" {
+        inline = [
+          "yum install -y httpd httpd-devel php php-mbstring",
+          "systemctl restart httpd.service",
+          "systemctl enable httpd.service",
+          "systemctl stop firewalld.service",
+          "systemctl disable firewalld.service"
+        ]
+   }
+
+   # 3: Webコンテンツをアップロード
+   provisioner "file" {
+        source = "webapps/"
+        destination = "/var/www/html"
+   }
+
 }
 
 resource "sakuracloud_ssh_key" "mykey" {
     name = "mykey"
     public_key = "${file("./id_rsa.pub")}"
+}
+
+resource "sakuracloud_dns" "dns" {
+    zone = "fe-bc.net"
+    records = {
+        name = "web"
+        type = "A"
+        value = "${sakuracloud_server.server.0.base_nw_ipaddress}"
+    }
+    records = {
+        name = "web"
+        type = "A"
+        value = "${sakuracloud_server.server.1.base_nw_ipaddress}"
+    }
 }
 
 output "global_ip" {
