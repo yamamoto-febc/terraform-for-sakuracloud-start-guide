@@ -12,13 +12,13 @@ Qiitaでの連載「[Terraform for さくらのクラウド スタートガイ�
   - [第4回サンプルコード](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/tree/no4) / [Qiita連載第4回](http://qiita.com/yamamoto-febc/items/a9795cb909bd9b69f729) ([第3回との差分表示](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/compare/no3...no4))
   - [第5回サンプルコード](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/tree/no5) / [Qiita連載第5回](http://qiita.com/yamamoto-febc/items/4b774404e041fa05688a) ([第4回との差分表示](https://github.com/yamamoto-febc/terraform-for-sakuracloud-start-guide/compare/no4...no5))
 
-## 第1回
+## 第2回
 
-[連載第1回](http://qiita.com/yamamoto-febc/items/ae92cd258cf040957487)のサンプルコードです。
+[連載第2回](http://qiita.com/yamamoto-febc/items/2480b11c9e6a8b64f78d)のサンプルコードです。
 
-![servers01.png](images/servers01.png)
+![servers02.png](images/servers02.png)
 
-## 第1回 : tfファイル
+## 第2回 : tfファイル
 
 ```sakura.tf
 provider "sakuracloud" {
@@ -26,16 +26,27 @@ provider "sakuracloud" {
     secret = "先ほど取得した[ACCESS_TOKEN_SECRET]"
 }
 
-resource "sakuracloud_disk" "disk"{
-    name = "disk01"
+resource "sakuracloud_disk" "disk" {
+    name = "${format("disk%02d" , count.index+1)}"
     source_archive_name = "CentOS 7.2 64bit"
-    # 任意のパスワードを設定してください。
-    password = "YourPassword"
+    ssh_key_ids = ["${sakuracloud_ssh_key.mykey.id}"]
+    disable_pw_auth = true
+    count = 2
 }
 
 resource "sakuracloud_server" "server" {
-    name = "server01"
-    disks = ["${sakuracloud_disk.disk.id}"]
+    name = "${format("server%02d" , count.index+1)}"
+    disks = ["${element(sakuracloud_disk.disk.*.id,count.index)}"]
+    count = 2
+}
+
+resource "sakuracloud_ssh_key" "mykey" {
+    name = "mykey"
+    public_key = "${file("./id_rsa.pub")}"
+}
+
+output "global_ip" {
+    value = "${join("\n" , formatlist("%s : %s" , sakuracloud_server.server.*.name , sakuracloud_server.server.*.base_nw_ipaddress))}"
 }
 ```
 
