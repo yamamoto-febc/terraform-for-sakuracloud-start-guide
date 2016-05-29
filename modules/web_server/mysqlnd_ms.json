@@ -1,0 +1,17 @@
+{
+  "demo": {
+    "master": {
+      "master_1": {
+        "host": "${server01_ip}",
+        "port": "3306"
+      },
+      "master_2": {
+        "host": "${server02_ip}",
+        "port": "3306"
+      }
+    },
+    "slave": {},
+    "filters": { "roundrobin": [] },
+    "failover": { "strategy": "loop_before_master", "remember_failed": true }
+  }
+}

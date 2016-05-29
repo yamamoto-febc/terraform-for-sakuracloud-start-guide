@@ -17,122 +17,154 @@ variable "mysql_values" {
         root_password = "mysql_password"
         user_name = "demo"
         user_password = "demo_password"
+        server_id_is1a = "201"
+        server_id_tk1a = "202"
     }
 }
 variable "private_ip_addresses" {
     default = {
-        server01 = "192.168.2.101"
-        server02 = "192.168.2.102"
-        server_db = "192.168.2.201"
+        is1a_web_servers_01 = "192.168.2.101"
+        is1a_web_servers_02 = "192.168.2.102"
+        tk1a_web_servers_01 = "192.168.2.111"
+        tk1a_web_servers_02 = "192.168.2.112"
+        is1a_db_server = "192.168.2.201"
+        tk1a_db_server = "192.168.2.202"
+    }
+}
+variable "ssh_keyfile" {
+    default = {
+        web = "id_rsa"
+        db = "id_rsa_db"
+    }
+}
+variable "dns_values" {
+    default = {
+        host_name = "web"
+        domain = "fe-bc.net"
     }
 }
 
 /*****************
- * Disk
+ * is1a resources
  *****************/
-resource "sakuracloud_disk" "disk" {
-    name = "${format("disk%02d" , count.index+1)}"
-    source_archive_name = "CentOS 7.2 64bit"
-    ssh_key_ids = ["${sakuracloud_ssh_key.mykey.id}"]
-    disable_pw_auth = true
-    count = 2
+module "is1a_web_servers" {
+    source = "./modules/web_server"
+    zone = "is1a"
+    # ssh
+    ssh_key_id = "${sakuracloud_ssh_key.mykey.id}"
+    ssh_keyfile = "${var.ssh_keyfile.web}"
+
+    # switch
+    switch_id = "${sakuracloud_switch.sw_is1a.id}"
+
+    # ip_addresses
+    private_ip_addresses = "${var.private_ip_addresses.is1a_web_servers_01},${var.private_ip_addresses.is1a_web_servers_02}"
+
+    db01_ip = "${var.private_ip_addresses.is1a_db_server}"
+    db02_ip = "${var.private_ip_addresses.tk1a_db_server}"
+
+    # count
+    servers = 2
 }
-resource "sakuracloud_disk" "disk_db" {
-    name = "disk_db"
-    source_archive_name = "CentOS 7.2 64bit"
-    ssh_key_ids = ["${sakuracloud_ssh_key.dbkey.id}"]
-    disable_pw_auth = true
+module "is1a_db_server" {
+    source = "./modules/db_server"
+    zone = "is1a"
+    # ssh
+    ssh_key_id = "${sakuracloud_ssh_key.dbkey.id}"
+    ssh_keyfile = "${var.ssh_keyfile.db}"
+
+    # switch
+    switch_id = "${sakuracloud_switch.sw_is1a.id}"
+
+    # ip_addresses
+    private_ip_addresses = "${var.private_ip_addresses.is1a_db_server}"
+
+    # mysql_values
+    mysql_root_password = "${var.mysql_values.root_password}"
+    mysql_user_name = "${var.mysql_values.user_name}"
+    mysql_user_password = "${var.mysql_values.user_password}"
+    mysql_server_id = "${var.mysql_values.server_id_is1a}"
+}
+resource "sakuracloud_switch" "sw_is1a" {
+    name = "sw_is1a"
+    zone = "is1a"
+    bridge_id = "${sakuracloud_bridge.br01.id}"
 }
 
 /*****************
- * Server
+ * tk1a resources
  *****************/
-resource "sakuracloud_server" "server" {
-    name = "${format("server%02d" , count.index+1)}"
-    disks = ["${element(sakuracloud_disk.disk.*.id,count.index)}"]
-    additional_interfaces = ["${sakuracloud_switch.sw01.id}"]
-    packet_filter_ids = ["${sakuracloud_packet_filter.pf_web.id}"]
-    count = 2
-    # サーバーにはSSHで接続
-    connection {
-        user = "root"
-        host = "${self.base_nw_ipaddress}"
-        private_key = "${file("./id_rsa")}"
-    }
+module "tk1a_web_servers" {
+    source = "./modules/web_server"
+    zone = "tk1a"
+    # ssh
+    ssh_key_id = "${sakuracloud_ssh_key.mykey.id}"
+    ssh_keyfile = "${var.ssh_keyfile.web}"
 
-    # yumでapache+PHPのインストール
-    provisioner "remote-exec" {
-        inline = [
-            "yum install -y httpd httpd-devel php php-mbstring php-mysqlnd",
-            "systemctl restart httpd.service",
-            "systemctl enable httpd.service",
-            "systemctl stop firewalld.service",
-            "systemctl disable firewalld.service"
-        ]
-    }
+    # switch
+    switch_id = "${sakuracloud_switch.sw_tk1a.id}"
 
-    # Webコンテンツをアップロード
-    provisioner "file" {
-        source = "webapps/"
-        destination = "/var/www/html"
-    }
+    # ip_addresses
+    private_ip_addresses = "${var.private_ip_addresses.tk1a_web_servers_01},${var.private_ip_addresses.tk1a_web_servers_02}"
 
-    # IP設定スクリプトをアップロード
-    provisioner "file" {
-        source = "provision_private_ip.sh"
-        destination = "/tmp/provision_private_ip.sh"
-    }
+    db01_ip = "${var.private_ip_addresses.is1a_db_server}"
+    db02_ip = "${var.private_ip_addresses.tk1a_db_server}"
 
-    # IP設定実行
-    provisioner "remote-exec" {
-        inline = [
-            "chmod +x /tmp/provision_private_ip.sh",
-            "/tmp/provision_private_ip.sh ${lookup(var.private_ip_addresses , self.name)}"
-        ]
-    }
+    # count
+    servers = 2
+}
+module "tk1a_db_server" {
+    source = "./modules/db_server"
+    zone = "tk1a"
+    # ssh
+    ssh_key_id = "${sakuracloud_ssh_key.dbkey.id}"
+    ssh_keyfile = "${var.ssh_keyfile.db}"
 
+    # switch
+    switch_id = "${sakuracloud_switch.sw_tk1a.id}"
 
+    # ip_addresses
+    private_ip_addresses = "${var.private_ip_addresses.tk1a_db_server}"
+
+    # mysql_values
+    mysql_root_password = "${var.mysql_values.root_password}"
+    mysql_user_name = "${var.mysql_values.user_name}"
+    mysql_user_password = "${var.mysql_values.user_password}"
+    mysql_server_id = "${var.mysql_values.server_id_tk1a}"
+}
+resource "sakuracloud_switch" "sw_tk1a" {
+    name = "sw_tk1a"
+    zone = "tk1a"
+    bridge_id = "${sakuracloud_bridge.br01.id}"
 }
 
-resource "sakuracloud_server" "server_db" {
-    name = "server_db"
-    disks = ["${sakuracloud_disk.disk_db.id}"]
-    additional_interfaces = ["${sakuracloud_switch.sw01.id}"]
-    packet_filter_ids = ["${sakuracloud_packet_filter.pf_db.id}"]
+/***************************************
+ * MySQL Replication(by null_resource)
+ ***************************************/
+module "db_replication" {
+    source = "./modules/db_replication"
+    ssh_keyfile = "${var.ssh_keyfile.db}"
 
-    # サーバーにはSSHで接続
-    connection {
-        user = "root"
-        host = "${self.base_nw_ipaddress}"
-        private_key = "${file("./id_rsa_db")}"
-    }
+    # mysql_values
+    mysql_root_password = "${var.mysql_values.root_password}"
+    mysql_user_name = "${var.mysql_values.user_name}"
+    mysql_user_password = "${var.mysql_values.user_name}"
 
-    # yumでmysqlのインストール
-    provisioner "remote-exec" {
-        inline = [
-            "yum install -y mysql-community-server",
-            "systemctl start mysql.service",
-            "mysql -uroot -e 'GRANT ALL ON *.* TO ${var.mysql_values.user_name}@\"192.168.2.%\" IDENTIFIED BY \"${var.mysql_values.user_password}\"'" ,
-            "mysqladmin -u root password '${var.mysql_values.root_password}'",
-            "systemctl stop firewalld.service",
-            "systemctl disable firewalld.service"
-        ]
-    }
+    # replication target servers
+    mysql_server_ids = "${element(split("," , module.is1a_db_server.ids),0)},${element(split("," , module.tk1a_db_server.ids),0)}"
 
-    # IP設定スクリプトをアップロード
-    provisioner "file" {
-        source = "provision_private_ip.sh"
-        destination = "/tmp/provision_private_ip.sh"
-    }
+    server01_ssh_ip = "${element(split("," , module.is1a_db_server.ip_addresses),0)}"
+    server02_ssh_ip = "${element(split("," , module.tk1a_db_server.ip_addresses),0)}"
 
-    # IP設定実行
-    provisioner "remote-exec" {
-        inline = [
-            "chmod +x /tmp/provision_private_ip.sh",
-            "/tmp/provision_private_ip.sh ${lookup(var.private_ip_addresses , self.name)}"
-        ]
-    }
+    server01_private_ip = "${var.private_ip_addresses.is1a_db_server}"
+    server02_private_ip = "${var.private_ip_addresses.tk1a_db_server}"
+}
 
+/*****************
+ * Bridge
+ *****************/
+resource "sakuracloud_bridge" "br01"{
+    name = "br01"
 }
 
 /*****************
@@ -140,130 +172,21 @@ resource "sakuracloud_server" "server_db" {
  *****************/
 resource "sakuracloud_ssh_key" "mykey" {
     name = "mykey"
-    public_key = "${file("./id_rsa.pub")}"
+    public_key = "${file("${path.root}/${var.ssh_keyfile.web}.pub")}"
 }
 
 resource "sakuracloud_ssh_key" "dbkey" {
     name = "dbkey"
-    public_key = "${file("./id_rsa_db.pub")}"
-}
-
-/*****************
- * Switch
- *****************/
-resource "sakuracloud_switch" "sw01" {
-    name = "sw01"
-}
-
-/*****************
- * PacketFilter
- *****************/
-resource "sakuracloud_packet_filter" "pf_web" {
-    name = "pf_web"
-    expressions = {
-        protocol = "tcp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "22"
-        description = "Allow SSH"
-        allow = true
-    }
-    expressions = {
-        protocol = "tcp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "80"
-        description = "Allow www"
-        allow = true
-    }
-    expressions = {
-        protocol = "tcp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "443"
-        description = "Allow www(ssl)"
-        allow = true
-    }
-    expressions = {
-        protocol = "tcp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "32768-61000"
-        description = "Allow return packet(tcp)"
-        allow = true
-    }
-    expressions = {
-        protocol = "udp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "32768-61000"
-        description = "Allow return packet(udp)"
-        allow = true
-    }
-    expressions = {
-        protocol = "icmp"
-        source_nw = "0.0.0.0"
-        allow = true
-        description = "Allow all icmp"
-    }
-    expressions = {
-        protocol = "fragment"
-        source_nw = "0.0.0.0"
-        allow = true
-        description = "Allow all fragment"
-    }
-    expressions = {
-        protocol = "ip"
-        source_nw = "0.0.0.0"
-        allow = false
-        description = "Deny all"
-    }
-}
-resource "sakuracloud_packet_filter" "pf_db" {
-    name = "pf_db"
-    expressions = {
-        protocol = "tcp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "22"
-        description = "Allow SSH"
-        allow = true
-    }
-    expressions = {
-        protocol = "tcp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "32768-61000"
-        description = "Allow return packet(tcp)"
-        allow = true
-    }
-    expressions = {
-        protocol = "udp"
-        source_nw = "0.0.0.0/0"
-        dest_port = "32768-61000"
-        description = "Allow return packet(udp)"
-        allow = true
-    }
-    expressions = {
-        protocol = "icmp"
-        source_nw = "0.0.0.0"
-        allow = true
-        description = "Allow all icmp"
-    }
-    expressions = {
-        protocol = "fragment"
-        source_nw = "0.0.0.0"
-        allow = true
-        description = "Allow all fragment"
-    }
-    expressions = {
-        protocol = "ip"
-        source_nw = "0.0.0.0"
-        allow = false
-        description = "Deny all"
-    }
+    public_key = "${file("${path.root}/${var.ssh_keyfile.db}.pub")}"
 }
 
 /*****************
  * SimpleMonitor
  *****************/
-
 # ping監視(DBサーバー)
 resource "sakuracloud_simple_monitor" "ping_monitor_db" {
-    target = "${sakuracloud_server.server_db.base_nw_ipaddress}"
+    count = 2
+    target = "${element(concat(split(",",module.is1a_db_server.ip_addresses),split("," , module.tk1a_db_server.ip_addresses)) , count.index)}"
     health_check = {
         protocol = "ping"
         delay_loop = 60
@@ -273,10 +196,10 @@ resource "sakuracloud_simple_monitor" "ping_monitor_db" {
     notify_slack_webhook = "${var.slack_webhook}"
 }
 
-# ping監視(webサーバー２台分)
+# ping監視(webサーバー4台分)
 resource "sakuracloud_simple_monitor" "ping_monitor_web" {
-    count = 2
-    target = "${element(sakuracloud_server.server.*.base_nw_ipaddress , count.index)}"
+    count = 4
+    target = "${element(concat(split(",",module.is1a_web_servers.ip_addresses),split("," , module.tk1a_web_servers.ip_addresses)) , count.index)}"
     health_check = {
         protocol = "ping"
         delay_loop = 60
@@ -285,10 +208,10 @@ resource "sakuracloud_simple_monitor" "ping_monitor_web" {
     notify_slack_enabled = true
     notify_slack_webhook = "${var.slack_webhook}"
 }
-# web監視(webサーバー2台分)
+# web監視(webサーバー4台分)
 resource "sakuracloud_simple_monitor" "http_monitor_web" {
-    count = 2
-    target = "${element(sakuracloud_server.server.*.base_nw_ipaddress , count.index)}"
+    count = 4
+    target = "${element(concat(split(",",module.is1a_web_servers.ip_addresses),split("," , module.tk1a_web_servers.ip_addresses)) , count.index)}"
     health_check = {
         protocol = "http"
         delay_loop = 60
@@ -300,39 +223,62 @@ resource "sakuracloud_simple_monitor" "http_monitor_web" {
     notify_slack_webhook = "${var.slack_webhook}"
 }
 
+/*****************
+ * GSLB
+ *****************/
+resource "sakuracloud_gslb" "gslb" {
+    name = "gslb01"
+    health_check = {
+        protocol = "http"
+        delay_loop = 10
+        host_header = "${var.dns_values.host_name}.${var.dns_values.domain}"
+        path = "/index.php"
+        status = "200"
+    }
+    servers = {
+        ipaddress = "${element(split("," , module.is1a_web_servers.ip_addresses),0)}"
+    }
+    servers = {
+        ipaddress = "${element(split("," , module.is1a_web_servers.ip_addresses),1)}"
+    }
+    servers = {
+        ipaddress = "${element(split("," , module.tk1a_web_servers.ip_addresses),0)}"
+    }
+    servers = {
+        ipaddress = "${element(split("," , module.tk1a_web_servers.ip_addresses),1)}"
+    }
+}
 
 /*****************
  * DNS
  *****************/
 resource "sakuracloud_dns" "dns" {
-    zone = "fe-bc.net"
+    zone = "${var.dns_values.domain}"
     records = {
-        name = "web"
-        type = "A"
-        value = "${sakuracloud_server.server.1.base_nw_ipaddress}"
-    }
-    records = {
-        name = "web"
-        type = "A"
-        value = "${sakuracloud_server.server.0.base_nw_ipaddress}"
+        name = "${var.dns_values.host_name}"
+        type = "CNAME"
+        value = "${sakuracloud_gslb.gslb.FQDN}."
     }
 }
 
 /*****************
  * Output
  *****************/
-output "global_ip" {
-    value = "${join("\n" , formatlist("%s : %s" , sakuracloud_server.server.*.name , sakuracloud_server.server.*.base_nw_ipaddress))}"
+output "ssh_is1a_web01" {
+    value = "${element(split("," , module.is1a_web_servers.ssh_commands),0)}"
 }
-output "global_ip_db" {
-    value = "${format("%s : %s\n" , sakuracloud_server.server_db.name , sakuracloud_server.server_db.base_nw_ipaddress)}"
+output "ssh_is1a_web02" {
+    value = "${element(split("," , module.is1a_web_servers.ssh_commands),1)}"
 }
-output "ssh_web01" {
-    value = "${format("ssh root@%s -i %s/id_rsa" , sakuracloud_server.server.0.base_nw_ipaddress , path.root)}"
+output "ssh_is1a_db" {
+    value = "${element(split("," , module.is1a_db_server.ssh_commands),0)}"
 }
-output "ssh_web02" {
-    value = "${format("ssh root@%s -i %s/id_rsa" , sakuracloud_server.server.1.base_nw_ipaddress , path.root)}"
+output "ssh_tk1a_web01" {
+    value = "${element(split("," , module.tk1a_web_servers.ssh_commands),0)}"
 }
-output "ssh_db" {
-    value = "${format("ssh root@%s -i %s/id_rsa_db" , sakuracloud_server.server_db.base_nw_ipaddress , path.root)}"
+output "ssh_tk1a_web02" {
+    value = "${element(split("," , module.tk1a_web_servers.ssh_commands),1)}"
+}
+output "ssh_tk1a_db" {
+    value = "${element(split("," , module.tk1a_db_server.ssh_commands),0)}"
 }
